@@ -188,7 +188,7 @@
   return new URLSearchParams(Array.from(fd.entries())).toString();
 }
 
-  async function submitToNetlify(form){
+async function submitToNetlify(form){
   const body = toUrlEncoded(form);
 
   const res = await fetch("/api/contact", {
@@ -197,14 +197,15 @@
     body
   });
 
-  if (!res.ok){
-    throw new Error(`Backend submit failed: ${res.status}`);
-  }
+  const raw = await res.text(); // <-- ez a lényeg
+  console.log("API STATUS:", res.status);
+  console.log("API RAW:", raw);
 
-  const out = await res.json().catch(() => ({}));
-  if (!out.ok){
-    throw new Error(out.error || "Backend returned not-ok");
-  }
+  let out = {};
+  try { out = JSON.parse(raw); } catch {}
+
+  if (!res.ok) throw new Error(`Backend submit failed: ${res.status} :: ${raw}`);
+  if (!out.ok) throw new Error(out.error || raw || "Backend returned not-ok");
 }
 
   async function mountModal(){
