@@ -23,14 +23,19 @@ function json(resBody, status = 200) {
 
 async function readBody(request) {
   const ct = request.headers.get("content-type") || "";
+
+  // JSON
   if (ct.includes("application/json")) {
     return await request.json();
   }
+
+  // URL-encoded / fallback
   const text = await request.text();
   if (ct.includes("application/x-www-form-urlencoded")) {
     const params = new URLSearchParams(text);
     return Object.fromEntries(params.entries());
   }
+
   try {
     return JSON.parse(text);
   } catch {
@@ -39,11 +44,17 @@ async function readBody(request) {
   }
 }
 
+// (opcionális, de hasznos) gyors ellenőrzésre:
+// ha megnyitod böngészőben: /api/contact -> "ok: true"
+export async function onRequestGet() {
+  return json({ ok: true, method: "GET" });
+}
+
 export async function onRequestPost(context) {
   try {
     const data = await readBody(context.request);
 
-    // Honeypot: ha bot kitölti, csendben OK
+    // Honeypot
     if ((data["bot-field"] || "").trim()) {
       return json({ ok: true });
     }
@@ -66,17 +77,18 @@ export async function onRequestPost(context) {
     const to = context.env.CONTACT_TO;
     const site = context.env.SITE_NAME || "Tarcsi Digital";
 
-    // Ajánlott: állítsd be Cloudflare-ben:
-    // CONTACT_FROM = "Tarcsi Digital <hello@tarcsidigital.com>"
-    // (ehhez a domainnek verifiednek kell lennie a Resendben)
-    //
-    // Ha nincs verified domain, a Resend "onboarding@resend.dev" sokszor működik tesztre,
-    // de productionben jobb a saját domained.
-    const from = context.env.CONTACT_FROM || `<onboarding@resend.dev>`;
+    // FONTOS:
+    // CONTACT_FROM legyen pl: "Tarcsi Digital <hello@tarcsidigital.com>"
+    // (verified domain kell hozzá, nálad már verified)
+    const from =
+      context.env.CONTACT_FROM || "Tarcsi Digital <onboarding@resend.dev>";
 
     if (!apiKey || !to) {
       return json(
-        { ok: false, error: "Server not configured (RESEND_API_KEY / CONTACT_TO missing)." },
+        {
+          ok: false,
+          error: "Server not configured (RESEND_API_KEY / CONTACT_TO missing).",
+        },
         500
       );
     }
@@ -109,12 +121,12 @@ export async function onRequestPost(context) {
       message || "(nincs üzenet)",
     ].join("\n");
 
-    // Resend API call
+    // Resend API payload (helyes mezőnevekkel!)
     const payload = {
       from,
       to: [to],
       subject,
-      replyTo: email, // válasz a felhasználónak menjen
+      reply_to: email, // ✅ ez a helyes mező (nem replyTo)
       text,
       html,
     };
@@ -131,15 +143,14 @@ export async function onRequestPost(context) {
     const resendBodyText = await resendRes.text().catch(() => "");
 
     if (!resendRes.ok) {
-      // Ez a rész MOST nagyon fontos: ebből látjuk pontosan mit kifogásol a Resend
       return json(
         {
           ok: false,
           error: "Resend send failed.",
           status: resendRes.status,
-          detail: resendBodyText,
+          detail: resendBodyText, // ✅ ezt majd a kliensen is nézzük meg
           hint:
-            "Gyakori ok: CONTACT_FROM nem verified domain. Állítsd be CONTACT_FROM-ot saját verified címre, vagy nézd meg a detail-t.",
+            "Tipikus ok: CONTACT_FROM nincs jól beállítva / nincs verified / rossz formátum. Nézd meg a detail-t.",
         },
         502
       );
