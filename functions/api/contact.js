@@ -1,6 +1,6 @@
 // /functions/api/contact.js
 // Cloudflare Pages Function: POST /api/contact
-// Email küldés MailChannels-szel (Workers/Pages kompatibilis)
+// Email küldés Resend API-val
 
 function escapeHtml(s = "") {
   return String(s)
@@ -31,7 +31,6 @@ async function readBody(request) {
     const params = new URLSearchParams(text);
     return Object.fromEntries(params.entries());
   }
-  // fallback
   const text = await request.text();
   try {
     return JSON.parse(text);
@@ -45,7 +44,7 @@ export async function onRequestPost(context) {
   try {
     const data = await readBody(context.request);
 
-    // Honeypot (ha bot kitölti, csendben OK-t adunk vissza)
+    // Honeypot: ha bot kitölti, csendben OK
     if ((data["bot-field"] || "").trim()) {
       return json({ ok: true });
     }
@@ -55,21 +54,29 @@ export async function onRequestPost(context) {
     const phone = (data.phone || "").trim();
     const message = (data.message || "").trim();
 
-    // callback lehet: "on" / "off" / "true" / "false" stb.
     const cbRaw = (data.callback ?? "").toString().toLowerCase();
-    const wantsCallback = cbRaw === "on" || cbRaw === "true" || cbRaw === "1" || cbRaw === "yes";
+    const wantsCallback =
+      cbRaw === "on" || cbRaw === "true" || cbRaw === "1" || cbRaw === "yes";
 
-    // Minimális szerver oldali ellenőrzés (a kliens már validál)
     if (!name || !email || !phone) {
       return json({ ok: false, error: "Missing required fields." }, 400);
     }
 
-    const to = context.env.CONTACT_TO;      // pl: hello@tarcsidigital.com
-    const from = context.env.CONTACT_FROM;  // pl: no-reply@tarcsidigital.com  (vagy hello@...)
+    const apiKey = context.env.RESEND_API_KEY;
+    const to = context.env.CONTACT_TO; // pl: hello@tarcsidigital.com
     const site = context.env.SITE_NAME || "Tarcsi Digital";
 
-    if (!to || !from) {
-      return json({ ok: false, error: "Server not configured (CONTACT_TO/CONTACT_FROM missing)." }, 500);
+    // Ha már verified a domained Resendben, beállíthatod:
+    // CONTACT_FROM = "Tarcsi Digital <no-reply@tarcsidigital.com>"
+    // Teszthez fallback:
+    const from =
+      context.env.CONTACT_FROM || `${site} <onboarding@resend.dev>`;
+
+    if (!apiKey || !to) {
+      return json(
+        { ok: false, error: "Server not configured (RESEND_API_KEY/CONTACT_TO missing)." },
+        500
+      );
     }
 
     const subject = wantsCallback
@@ -100,29 +107,45 @@ export async function onRequestPost(context) {
       message || "(nincs üzenet)",
     ].join("\n");
 
-    // MailChannels API
-    const mcRes = await fetch("https://api.mailchannels.net/tx/v1/send", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        personalizations: [{ to: [{ email: to }] }],
-        from: { email: from, name: site },
-        reply_to: { email, name },
-        subject,
-        content: [
-          { type: "text/plain", value: text },
-          { type: "text/html", value: html },
-        ],
-      }),
-    });
+    // Resend API
+    let resendRes;
+    try {
+      resendRes = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from,
+          to: [to],
+          subject,
+          reply_to: email, // válasz a felhasználónak menjen
+          text,
+          html,
+        }),
+      });
+    } catch (err) {
+      return json(
+        { ok: false, error: "Resend request threw exception.", detail: String(err) },
+        502
+      );
+    }
 
-    if (!mcRes.ok) {
-      const errText = await mcRes.text().catch(() => "");
-      return json({ ok: false, error: "Mail send failed.", detail: errText }, 502);
+    const resendText = await resendRes.text().catch(() => "");
+    if (!resendRes.ok) {
+      return json(
+        {
+          ok: false,
+          error: "Resend send failed.",
+          detail: resendText,
+        },
+        502
+      );
     }
 
     return json({ ok: true });
   } catch (e) {
-    return json({ ok: false, error: "Unexpected error." }, 500);
+    return json({ ok: false, error: "Unexpected error.", detail: String(e) }, 500);
   }
 }
