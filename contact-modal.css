@@ -1,5 +1,5 @@
 /* Fullscreen hero background + glass modal (matches your palette & fonts) */
-
+.cm-hp { display:none !important; }
 :root{
   --cm-pad-desktop: 56px;
   --cm-pad-tablet: 28px;

@@ -9,8 +9,8 @@
  */
 
 (() => {
-  const PATH_HTML = "contact-modal.html";
-  const PATH_CSS  = "contact-modal.css";
+  const PATH_HTML = "contact-modal.html?v=17";
+  const PATH_CSS  = "contact-modal.css?v=17";
   const NETLIFY_FORM_NAME = "contact";
 
   let mounted = false;
@@ -178,22 +178,15 @@
     }
   }
 
-  // --- Netlify submit helper (minimal) ---
 
   function toUrlEncoded(form){
-    const fd = new FormData(form);
+  const fd = new FormData(form);
 
-    // Netlify kötelező: form-name
-    fd.set("form-name", NETLIFY_FORM_NAME);
+  // checkbox: ha nincs bepipálva, biztosítsunk egy értéket
+  if (!fd.has("callback")) fd.set("callback", "off");
 
-    // checkbox: ha nincs bepipálva, biztosítsunk egy értéket
-    if (!fd.has("callback")) fd.set("callback", "off");
-    // ha be van pipálva, Netlify/HTML default "on" → oké
-
-    // honeypot mező marad, ha üres (jó)
-
-    return new URLSearchParams(Array.from(fd.entries())).toString();
-  }
+  return new URLSearchParams(Array.from(fd.entries())).toString();
+}
 
   async function submitToNetlify(form){
   const body = toUrlEncoded(form);
