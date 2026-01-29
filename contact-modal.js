@@ -196,18 +196,23 @@
   }
 
   async function submitToNetlify(form){
-    const body = toUrlEncoded(form);
+  const body = toUrlEncoded(form);
 
-    const res = await fetch("/", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body
-    });
+  const res = await fetch("/api/contact", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body
+  });
 
-    if (!res.ok){
-      throw new Error(`Netlify submit failed: ${res.status}`);
-    }
+  if (!res.ok){
+    throw new Error(`Backend submit failed: ${res.status}`);
   }
+
+  const out = await res.json().catch(() => ({}));
+  if (!out.ok){
+    throw new Error(out.error || "Backend returned not-ok");
+  }
+}
 
   async function mountModal(){
     if (mounted) return;
