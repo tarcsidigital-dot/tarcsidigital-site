@@ -1,6 +1,6 @@
-// /functions/api/contact.js
+// functions/api/contact.js
 // Cloudflare Pages Function: POST /api/contact
-// Email küldés Resend API-val
+// Email küldés Resend API-val (fetch)
 
 function escapeHtml(s = "") {
   return String(s)
@@ -23,21 +23,14 @@ function json(resBody, status = 200) {
 
 async function readBody(request) {
   const ct = request.headers.get("content-type") || "";
-
-  // JSON
   if (ct.includes("application/json")) {
     return await request.json();
   }
-
-  // x-www-form-urlencoded
+  const text = await request.text();
   if (ct.includes("application/x-www-form-urlencoded")) {
-    const text = await request.text();
     const params = new URLSearchParams(text);
     return Object.fromEntries(params.entries());
   }
-
-  // fallback: próbáljuk JSON-ként, ha nem megy, akkor URLSearchParams
-  const text = await request.text();
   try {
     return JSON.parse(text);
   } catch {
@@ -64,23 +57,26 @@ export async function onRequestPost(context) {
     const wantsCallback =
       cbRaw === "on" || cbRaw === "true" || cbRaw === "1" || cbRaw === "yes";
 
-    // Minimális szerver oldali ellenőrzés
     if (!name || !email || !phone) {
       return json({ ok: false, error: "Missing required fields." }, 400);
     }
 
+    // ENV
     const apiKey = context.env.RESEND_API_KEY;
-    const to = context.env.CONTACT_TO; // pl: hello@tarcsidigital.com
+    const to = context.env.CONTACT_TO;
     const site = context.env.SITE_NAME || "Tarcsi Digital";
 
-    // Ha már verified a domained Resendben:
-    // CONTACT_FROM = "Tarcsi Digital <no-reply@tarcsidigital.com>"
-    // Teszthez fallback:
-    const from = context.env.CONTACT_FROM || `${site} <onboarding@resend.dev>`;
+    // Ajánlott: állítsd be Cloudflare-ben:
+    // CONTACT_FROM = "Tarcsi Digital <hello@tarcsidigital.com>"
+    // (ehhez a domainnek verifiednek kell lennie a Resendben)
+    //
+    // Ha nincs verified domain, a Resend "onboarding@resend.dev" sokszor működik tesztre,
+    // de productionben jobb a saját domained.
+    const from = context.env.CONTACT_FROM || `<onboarding@resend.dev>`;
 
     if (!apiKey || !to) {
       return json(
-        { ok: false, error: "Server not configured (RESEND_API_KEY/CONTACT_TO missing)." },
+        { ok: false, error: "Server not configured (RESEND_API_KEY / CONTACT_TO missing)." },
         500
       );
     }
@@ -113,40 +109,42 @@ export async function onRequestPost(context) {
       message || "(nincs üzenet)",
     ].join("\n");
 
-    // Resend API (Cloudflare Pages Functionből)
-    let resendRes;
-    try {
-      resendRes = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from,
-          to: [to],
-          subject,
-          reply_to: { email, name }, // válasz a felhasználónak menjen
-          text,
-          html,
-        }),
-      });
-    } catch (err) {
-      return json(
-        { ok: false, error: "Resend request threw exception.", detail: String(err) },
-        502
-      );
-    }
+    // Resend API call
+    const payload = {
+      from,
+      to: [to],
+      subject,
+      replyTo: email, // válasz a felhasználónak menjen
+      text,
+      html,
+    };
 
-    const resendText = await resendRes.text().catch(() => "");
+    const resendRes = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const resendBodyText = await resendRes.text().catch(() => "");
+
     if (!resendRes.ok) {
+      // Ez a rész MOST nagyon fontos: ebből látjuk pontosan mit kifogásol a Resend
       return json(
-        { ok: false, error: "Resend send failed.", detail: resendText },
+        {
+          ok: false,
+          error: "Resend send failed.",
+          status: resendRes.status,
+          detail: resendBodyText,
+          hint:
+            "Gyakori ok: CONTACT_FROM nem verified domain. Állítsd be CONTACT_FROM-ot saját verified címre, vagy nézd meg a detail-t.",
+        },
         502
       );
     }
 
-    // ha érdekel később: resendText-ben jön vissza JSON az email id-val
     return json({ ok: true });
   } catch (e) {
     return json({ ok: false, error: "Unexpected error.", detail: String(e) }, 500);
