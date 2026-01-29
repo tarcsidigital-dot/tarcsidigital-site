@@ -23,14 +23,20 @@ function json(resBody, status = 200) {
 
 async function readBody(request) {
   const ct = request.headers.get("content-type") || "";
+
+  // JSON
   if (ct.includes("application/json")) {
     return await request.json();
   }
+
+  // x-www-form-urlencoded
   if (ct.includes("application/x-www-form-urlencoded")) {
     const text = await request.text();
     const params = new URLSearchParams(text);
     return Object.fromEntries(params.entries());
   }
+
+  // fallback: próbáljuk JSON-ként, ha nem megy, akkor URLSearchParams
   const text = await request.text();
   try {
     return JSON.parse(text);
@@ -58,6 +64,7 @@ export async function onRequestPost(context) {
     const wantsCallback =
       cbRaw === "on" || cbRaw === "true" || cbRaw === "1" || cbRaw === "yes";
 
+    // Minimális szerver oldali ellenőrzés
     if (!name || !email || !phone) {
       return json({ ok: false, error: "Missing required fields." }, 400);
     }
@@ -66,11 +73,10 @@ export async function onRequestPost(context) {
     const to = context.env.CONTACT_TO; // pl: hello@tarcsidigital.com
     const site = context.env.SITE_NAME || "Tarcsi Digital";
 
-    // Ha már verified a domained Resendben, beállíthatod:
+    // Ha már verified a domained Resendben:
     // CONTACT_FROM = "Tarcsi Digital <no-reply@tarcsidigital.com>"
     // Teszthez fallback:
-    const from =
-      context.env.CONTACT_FROM || `${site} <onboarding@resend.dev>`;
+    const from = context.env.CONTACT_FROM || `${site} <onboarding@resend.dev>`;
 
     if (!apiKey || !to) {
       return json(
@@ -107,7 +113,7 @@ export async function onRequestPost(context) {
       message || "(nincs üzenet)",
     ].join("\n");
 
-    // Resend API
+    // Resend API (Cloudflare Pages Functionből)
     let resendRes;
     try {
       resendRes = await fetch("https://api.resend.com/emails", {
@@ -120,7 +126,7 @@ export async function onRequestPost(context) {
           from,
           to: [to],
           subject,
-          reply_to: email, // válasz a felhasználónak menjen
+          reply_to: { email, name }, // válasz a felhasználónak menjen
           text,
           html,
         }),
@@ -135,15 +141,12 @@ export async function onRequestPost(context) {
     const resendText = await resendRes.text().catch(() => "");
     if (!resendRes.ok) {
       return json(
-        {
-          ok: false,
-          error: "Resend send failed.",
-          detail: resendText,
-        },
+        { ok: false, error: "Resend send failed.", detail: resendText },
         502
       );
     }
 
+    // ha érdekel később: resendText-ben jön vissza JSON az email id-val
     return json({ ok: true });
   } catch (e) {
     return json({ ok: false, error: "Unexpected error.", detail: String(e) }, 500);
